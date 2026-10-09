@@ -1,0 +1,101 @@
+Add a Lottery Scheduler to xv6
+In this project, you will replace the current round robin scheduler in xv6 with a lottery scheduler.
+
+
+Existing Scheduler Understanding (Done)
+Before modifying the scheduler, study the existing xv6 scheduler and answer the questions below in report.txt. 
+1. Where is the round robin scheduling decision made? Identify the relevant function and code region.
+2. What condition must hold before a process can be selected to run?
+3. What important process-state or context changes occur when the scheduler transfers control to a
+process and when control returns to the scheduler?
+
+Design Before Implementation
+Before modifying the scheduler, study the existing xv6 scheduler and answer the questions below in report.txt. 
+1. Where will the number of tickets for each process be stored?
+2. Where will the default ticket value be initialized?
+3. How will a child process inherit the ticket count of its parent?
+4. How will your scheduler determine the total number of tickets held by RUNNABLE processes?
+5. How will a lottery winner be selected from the RUNNABLE processes?
+6. Where and when will you maintain the tick count reported by getpinfo()?
+
+
+The basic idea is simple:
+Assign each RUNNABLE process a share of the processor in proportion to the number of tickets it has. The more tickets a process has, the greater its probability of being selected. Each time slice, a randomized lottery determines the winner; that process runs for that time slice.
+
+Setting Tickets
+Implement a new system call to set the number of tickets for the calling process.
+The prototype is:
+int settickets(int)
+This call sets the number of tickets of the calling process. By default, each process should get one ticket. A process can raise or reduce its number of tickets by calling this routine, and thus receive a higher or lower expected proportion of CPU time. The call should return 0 if successful and -1 otherwise (for example, if the caller passes a value less than one).
+
+Implementing the Scheduler
+Most of the scheduler code can be found in proc.c; the associated header file proc.h is also useful. Study the existing scheduler control flow and replace the round robin selection logic with your lottery scheduler.
+
+A child process must inherit the same number of tickets as its parent. For example, if a process with 10 tickets calls fork(), the child should also begin with 10 tickets.
+
+Your lottery must consider only RUNNABLE processes. You will also need a pseudo-random number generator that can run inside the kernel.
+
+Getting Process Statistics
+Implement a second system call to gather scheduling statistics. The prototype is:
+int getpinfo(struct pstat *)
+This routine returns information about processes, including whether a process-table slot is in use, the
+number of tickets assigned to the process, the process ID, and the number of ticks the process has
+accumulated. The ticks value should increase once for each time slice in which the process is selected to
+run. The call should return 0 if successful and -1 otherwise (for example, if a bad or NULL pointer is
+passed into the kernel).
+Use the following structure exactly as shown in a file named pstat.h. Do not change the structure.
+#ifndef _PSTAT_H_
+#define _PSTAT_H_
+#include "param.h"
+struct pstat {
+ int inuse[NPROC]; // whether this slot of the process table is in use (1 or 0)
+ int tickets[NPROC]; // the number of tickets this process has
+ int pid[NPROC]; // the PID of each process
+ int ticks[NPROC]; // the number of ticks each process has accumulated
+};
+#endif // _PSTAT_H_
+Good examples of how to pass arguments into the kernel can be found in existing system calls. In
+particular, follow the path of read() to sys_read() and study how xv6 validates and uses pointers passed
+from user space. User pointers must be checked carefully before the kernel uses them.
+
+
+Experimental Evaluation
+Your implementation must be evaluated experimentally, not only by passing the provided test cases.
+Run three CPU-bound processes whose tickets are in a 3:2:1 ratio (for example, 30, 20, and 10 tickets).
+Before running the experiment, state the expected long-run CPU shares for the three processes. During
+execution, record the accumulated ticks for each process at several points over time and plot the results.
+
+• Compare the observed CPU shares with the expected proportions.
+• Explain why the observed proportions are not expected to be exact.
+CS 4348 Operating Systems - Project 1
+• Discuss whether the observed proportions become more stable as the processes run longer.
+Submit the graph as a PDF file and include your prediction and interpretation in report.txt. You do not need
+to auto-generate the graph; you may record the results and plot them using any graphing tool. Name the
+file graph.pdf
+
+
+Testing
+Sample programs to test your implementation are available in:
+P1/
+and rebuild the xv6 kernel with them.
+By default, QEMU boots xv6 with two CPUs. For this project, use one CPU; otherwise, some test cases
+may fail. You can change the default value for CPUS to 1 in the xv6 Makefile or run:
+make qemu CPUS=1
+Do not treat passing the provided tests as sufficient evidence that your scheduler is correct. Understand
+what each test is checking and investigate failures rather than modifying code only until the tests pass.
+
+
+Additional Test Design
+Identify one important scheduler property or plausible failure mode that is not directly tested by the
+provided test cases. In report.txt, describe:
+• the property or failure mode you want to test;
+• the setup for the test;
+• the behavior you expect from a correct implementation;
+• what result would indicate an incorrect implementation; and
+• why this test would add useful coverage beyond the provided tests.
+Implementing and running this additional test is optional. If you implement it, include the test program with
+your submission and report the result.
+
+Style
+Provide adequate comments so that another programmer can understand the code you added or modified.
+Follow the coding style of the xv6 code base.
