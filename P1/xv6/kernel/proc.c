@@ -43,6 +43,8 @@ allocproc(void)
   return 0;
 
 found:
+  p->tickets = 1; // default number of tickets
+  p->ticks = 0; // initialize ticks to 0
   p->state = EMBRYO;
   p->pid = nextpid++;
   release(&ptable.lock);
@@ -144,6 +146,9 @@ fork(void)
   np->sz = proc->sz;
   np->parent = proc;
   *np->tf = *proc->tf;
+
+  np->tickets = proc->tickets; // inherit number of tickets from parent
+  np->ticks = 0; // initialize ticks to 0 for the new process
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
