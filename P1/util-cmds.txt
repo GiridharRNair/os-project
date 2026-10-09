@@ -1,5 +1,34 @@
 docker run --rm -it -v "$PWD/xv6":/xv6 xv6-dev bash
-make qemu-nox      
+make qemu-nox
 
 Exit xv6 - Ctrl-a then x to quit
 Exit the Docker container - Ctrl-d or type exit
+
+
+Running the test cases
+----------------------
+All test sources are already copied into xv6/user/.
+Enable them in xv6/user/makefile.mk by removing the "#" in front of a
+"USER_PROGS +=" line. Only enable a group once its syscalls exist,
+otherwise the whole build fails.
+
+  group 1 (needs settickets):          setticket
+  group 2 (needs getpinfo, passes      default_tickets forktickets
+           even with round robin):     getpinfo processesinuse
+  group 3 (needs lottery scheduler):   random high_tickets high_sleep
+                                       switch_tickets stress_equal
+                                       stress_manylow
+
+Inside the container (from the commands above):
+  make clean          # force a full rebuild if something seems stale
+  make qemu-nox       # rebuilds fs.img with the enabled tests and boots
+
+At the xv6 $ prompt:
+  ls                  # list programs in the image (check the test is there)
+  setticket           # run a test by its name (no .c)
+  usertests           # xv6's own tests, should print ALL TESTS PASSED
+
+A test prints nothing (or its own summary) on success and
+"<file>:<line> check (...) failed: <msg>" on failure.
+"exec <name> failed" means the program is not in fs.img:
+the USER_PROGS line is still commented out or the build failed.
