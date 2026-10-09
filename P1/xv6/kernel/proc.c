@@ -5,6 +5,7 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
+#include "pstat.h"
 
 struct {
   struct spinlock lock;
@@ -174,6 +175,27 @@ settickets(int n)
 
   acquire(&ptable.lock);
   proc->tickets = n;
+  release(&ptable.lock);
+  return 0;
+}
+
+// Fill ps with a snapshot of every process-table slot.
+// Index i of each array describes ptable.proc[i].
+// The caller must have checked that ps is a valid user pointer.
+int
+getpinfo(struct pstat *ps)
+{
+  struct proc *p;
+  int i;
+
+  acquire(&ptable.lock);
+  for(i = 0; i < NPROC; i++){
+    p = &ptable.proc[i];
+    ps->inuse[i] = (p->state != UNUSED);
+    ps->tickets[i] = p->tickets;
+    ps->pid[i] = p->pid;
+    ps->ticks[i] = p->ticks;
+  }
   release(&ptable.lock);
   return 0;
 }

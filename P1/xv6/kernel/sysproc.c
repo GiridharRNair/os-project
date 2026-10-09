@@ -5,6 +5,7 @@
 #include "mmu.h"
 #include "proc.h"
 #include "sysfunc.h"
+#include "pstat.h"
 
 int
 sys_fork(void)
@@ -98,4 +99,18 @@ sys_settickets(void)
   if(argint(0, &n) < 0)
     return -1;
   return settickets(n);
+}
+
+// get the process information for all processes in the system.
+int
+sys_getpinfo(void)
+{
+  struct pstat *pstat;
+
+  // argptr checks that the whole struct lies inside the caller's memory.
+  // user programs are loaded at address 0, so argptr accepts NULL as a
+  // valid address; reject it explicitly.
+  if(argptr(0, (char**)&pstat, sizeof(*pstat)) < 0 || pstat == 0)
+    return -1;
+  return getpinfo(pstat);
 }
