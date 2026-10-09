@@ -17,9 +17,17 @@ USER_PROGS := \
 	usertests\
 	wc\
 	zombie\
-	setticket
+	setticket\
+	default_tickets\
+	forktickets\
+	getpinfo\
+	processesinuse
 
 USER_PROGS := $(addprefix user/, $(USER_PROGS))
+
+# the provided forktickets.c test mixes tabs and spaces, which newer gcc
+# reports as misleading indentation; keep that from failing the build
+user/forktickets.o: USER_CFLAGS += -Wno-misleading-indentation
 
 # user library files
 USER_LIBS := \
