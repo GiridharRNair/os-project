@@ -286,43 +286,92 @@ wait(void)
   }
 }
 
+// Pseudo-random number generator for the lottery (xorshift32).
+// The kernel has no C library rand(), so keep a small one here.
+// The state must never be 0, or every later value would be 0.
+static uint rand_state = 2463534242;
+
+static uint
+rand(void)
+{
+  rand_state ^= rand_state << 13;
+  rand_state ^= rand_state >> 17;
+  rand_state ^= rand_state << 5;
+  return rand_state;
+}
+
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
 // Scheduler never returns.  It loops, doing:
-//  - choose a process to run
-//  - swtch to start running that process
+//  - hold a lottery among the RUNNABLE processes
+//  - swtch to start running the winner for one time slice
 //  - eventually that process transfers control
 //      via swtch back to the scheduler.
+// A process wins with probability tickets / (total RUNNABLE tickets),
+// so it gets a share of the CPU proportional to its tickets.
 void
 scheduler(void)
 {
   struct proc *p;
+  uint total, winner, counter;
 
   for(;;){
     // Enable interrupts on this processor.
     sti();
 
-    // Loop over process table looking for process to run.
     acquire(&ptable.lock);
+
+    // Count the tickets held by RUNNABLE processes only.
+    total = 0;
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+      if(p->state == RUNNABLE)
+        total += p->tickets;
+
+    // Nothing to run; drop the lock so interrupts can make
+    // a process RUNNABLE, then try again.
+    if(total == 0){
+      release(&ptable.lock);
+      continue;
+    }
+
+    // Draw a winning ticket in [0, total) and find its owner:
+    // each RUNNABLE process owns the next p->tickets numbers,
+    // so the first process whose running sum passes winner wins.
+    winner = rand() % total;
+    counter = 0;
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->state != RUNNABLE)
         continue;
-
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
-      proc = p;
-      switchuvm(p);
-      p->state = RUNNING;
-      swtch(&cpu->scheduler, proc->context);
-      switchkvm();
-
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
-      proc = 0;
+      counter += p->tickets;
+      if(counter > winner)
+        break;
     }
-    release(&ptable.lock);
 
+    // Should not happen while ptable.lock is held, but never
+    // switch to a slot past the end of the table.
+    if(p == &ptable.proc[NPROC]){
+      release(&ptable.lock);
+      continue;
+    }
+
+    // Count one time slice for the winner (reported by getpinfo).
+    p->ticks++;
+
+    // Switch to chosen process.  It is the process's job
+    // to release ptable.lock and then reacquire it
+    // before jumping back to us.
+    proc = p;
+    switchuvm(p);
+    p->state = RUNNING;
+    swtch(&cpu->scheduler, proc->context);
+    switchkvm();
+
+    // Process is done running for now.
+    // It should have changed its p->state before coming back.
+    proc = 0;
+
+    // One lottery per pass: release the lock and hold a new lottery.
+    release(&ptable.lock);
   }
 }
 
