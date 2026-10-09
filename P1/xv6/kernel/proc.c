@@ -164,6 +164,20 @@ fork(void)
   return pid;
 }
 
+// Set the number of lottery tickets for the current process.
+// Returns 0 on success, -1 if n is less than 1.
+int
+settickets(int n)
+{
+  if(n < 1)
+    return -1;
+
+  acquire(&ptable.lock);
+  proc->tickets = n;
+  release(&ptable.lock);
+  return 0;
+}
+
 // Exit the current process.  Does not return.
 // An exited process remains in the zombie state
 // until its parent calls wait() to find out it exited.

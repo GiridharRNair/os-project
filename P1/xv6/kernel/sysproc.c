@@ -88,3 +88,14 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+// set the number of lottery tickets for the calling process.
+int
+sys_settickets(void)
+{
+  int n;
+
+  if(argint(0, &n) < 0)
+    return -1;
+  return settickets(n);
+}
