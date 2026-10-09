@@ -1,0 +1,5 @@
+docker run --rm -it -v "$PWD/xv6":/xv6 xv6-dev bash
+make qemu-nox      
+
+Exit xv6 - Ctrl-a then x to quit
+Exit the Docker container - Ctrl-d or type exit
