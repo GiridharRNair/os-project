@@ -27,7 +27,8 @@ USER_PROGS := \
 	high_sleep\
 	switch_tickets\
 	stress_equal\
-	stress_manylow
+	stress_manylow\
+	lotterytest
 
 USER_PROGS := $(addprefix user/, $(USER_PROGS))
 

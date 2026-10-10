@@ -1,0 +1,85 @@
+Experimental Evaluation
+
+Setup
+
+The experiment program is xv6/user/lotterytest.c. The parent forks three CPU-bound children with 30, 20 and 10 tickets (a 3:2:1 ratio). The parent calls settickets() with the child's count right before each fork(), so each child inherits its intended tickets from the moment it is created. Each child then spins in an infinite loop that never sleeps or does I/O, so every time slice it wins is fully used. The parent sleeps for 100 timer ticks, calls getpinfo(), prints the accumulated ticks of the three children, and repeats this 30 times (3000 timer ticks in total). xv6 runs on one CPU (CPUS := 1). The plot of the results is in graph.pdf: panel (a) shows the accumulated ticks of each process over time and panel (b) shows each process's share of the three processes' ticks over time, with dashed lines at the expected values.
+
+1. Prediction (made before running the experiment)
+
+The lottery only counts RUNNABLE processes, and the other processes in the system (init, sh, and the parent between samples) spend almost all their time sleeping, so the three children are effectively the only processes in the lottery. Each time slice, a process wins with probability (its tickets) / (total tickets) = tickets / 60. The expected long-run CPU shares are therefore:
+
+  30 tickets: 30/60 = 50.0%
+  20 tickets: 20/60 = 33.3%
+  10 tickets: 10/60 = 16.7%
+
+Over 3000 time slices this predicts about 1500, 1000 and 500 ticks. I also predicted that the shares would be noticeably off early in the run, when only a few hundred lotteries have been held, and would move closer to these values the longer the processes run.
+
+2. Results and comparison with the expected proportions
+
+Shares of the three children's ticks at selected sample points (percent; expected 50.0 / 33.3 / 16.7):
+
+  time   ticks (30/20/10)    30 tickets   20 tickets   10 tickets
+   100     55 /   36 /   9     55.0         36.0          9.0
+   300    152 /  110 /  38     50.7         36.7         12.7
+   500    249 /  181 /  70     49.8         36.2         14.0
+  1000    490 /  363 / 147     49.0         36.3         14.7
+  2000    994 /  690 / 316     49.7         34.5         15.8
+  3000   1493 / 1002 / 505     49.8         33.4         16.8
+
+At the end of the run the processes received 1493, 1002 and 505 ticks, or 49.8%, 33.4% and 16.8% of the CPU. Every share is within 0.2 percentage points of the expected value, and the observed ratio is 2.96 : 1.98 : 1, very close to 3 : 2 : 1. (lotterytest itself printed 49.7% for the first process because it truncates instead of rounding.) The three children's ticks add up to the elapsed time at every sample (for example 1493 + 1002 + 505 = 3000 at time 3000), so the sleeping processes took a negligible share of the CPU, as assumed in the prediction.
+
+Early in the run the shares were further off. After the first 100 ticks the 10-ticket process had only 9.0% instead of 16.7% (7.7 points low), and the 30-ticket process had 55.0%. The 20-ticket process was above its expected share at every sample, around 36-37% from time 300 to 1000, and only came down to 33.4% by the end of the run.
+
+3. Why the observed proportions are not expected to be exact
+
+- The scheduler is random. Every time slice is an independent lottery, so the number of slices a process wins out of n is a random (binomial) count, not a fixed fraction. A process with expected share p gets a share whose standard deviation is about sqrt(p(1-p)/n). After n = 100 slices this is about 5.0, 4.7 and 3.7 percentage points for the three processes, so deviations like the 7.7-point shortfall at time 100 are normal (about two standard deviations). After n = 3000 slices it is only about 0.9, 0.9 and 0.7 points, which matches the small final deviations. Lottery scheduling is only fair in a probabilistic sense: it gives the right proportions on average, not exactly.
+
+- The samples are cumulative, so early luck lingers. A process that wins more than its share early (like the 20-ticket process here) keeps that surplus in its total, and it takes many later slices to dilute it. This is why the 20-ticket curve stayed above 33.3% for a long stretch even though each individual lottery was fair.
+
+- The run is finite. Only 3000 lotteries were held; the exact proportions are only reached in the limit of infinitely many slices.
+
+- ticks counts how many times a process was selected, not exact CPU time. A process selected part-way through a timer tick (for example right after the parent goes back to sleep) gets a shorter slice but still counts as one tick.
+
+- Other processes interfere slightly. The parent wakes up every 100 ticks to call getpinfo() and print a line, and the shell and init exist in the background. They hold the CPU only briefly, but they are not part of the 3:2:1 split.
+
+- The random numbers come from a pseudo-random generator (xorshift32) with a fixed seed. The sequence is evenly distributed but it is one particular deterministic sequence, so any single run shows one particular pattern of deviations rather than the exact average.
+
+4. Do the observed proportions become more stable as the processes run longer?
+
+Yes. Panel (b) of graph.pdf shows the share lines swinging widely during the first few hundred ticks and then flattening onto the dashed expected lines. Measured numerically, the largest deviation from the expected share at any of the first five samples (time 100 to 500) was 7.7 percentage points, while at every one of the last ten samples (time 2100 to 3000) it was at most 1.0 point. This matches the law of large numbers: the expected error shrinks in proportion to 1/sqrt(n), so running 30 times longer (from 100 to 3000 slices) should make the error about sqrt(30), or roughly 5.5 times, smaller, which is what the data shows (from about 5 points to under 1 point).
+
+What becomes stable is the long-run cumulative share, not the short-term behavior. Within each individual 100-tick interval the shares kept fluctuating for the whole run (the 30-ticket process got between 42% and 58% of the slices in different intervals, and the 10-ticket process between 9% and 25%). The lottery does not get more precise over time; the random deviations simply average out as more slices accumulate. So lottery scheduling achieves proportional sharing well over long periods but gives weaker guarantees over short periods.
+
+Raw data (time in timer ticks, accumulated ticks of the 30-, 20- and 10-ticket processes)
+
+time,ticks_30,ticks_20,ticks_10
+100,55,36,9
+200,104,69,27
+300,152,110,38
+400,198,150,52
+500,249,181,70
+600,291,223,86
+700,342,255,103
+800,388,296,116
+900,440,326,134
+1000,490,363,147
+1100,539,394,167
+1200,588,426,186
+1300,636,462,202
+1400,683,502,215
+1500,737,534,229
+1600,783,569,248
+1700,838,596,266
+1800,893,629,278
+1900,944,657,299
+2000,994,690,316
+2100,1038,721,341
+2200,1096,752,352
+2300,1142,783,375
+2400,1194,813,393
+2500,1241,851,408
+2600,1289,883,428
+2700,1338,912,450
+2800,1387,943,470
+2900,1443,970,487
+3000,1493,1002,505
