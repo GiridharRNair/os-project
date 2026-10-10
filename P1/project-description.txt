@@ -10,7 +10,7 @@ Before modifying the scheduler, study the existing xv6 scheduler and answer the 
 process and when control returns to the scheduler?
 
 Design Before Implementation
-Before modifying the scheduler, study the existing xv6 scheduler and answer the questions below in report.txt. 
+Before modifying the scheduler, study the existing xv6 scheduler and answer the questions below in report.txt. (Done)
 1. Where will the number of tickets for each process be stored?
 2. Where will the default ticket value be initialized?
 3. How will a child process inherit the ticket count of its parent?
@@ -59,7 +59,7 @@ particular, follow the path of read() to sys_read() and study how xv6 validates 
 from user space. User pointers must be checked carefully before the kernel uses them.
 
 
-Experimental Evaluation
+Experimental Evaluation (Done)
 Your implementation must be evaluated experimentally, not only by passing the provided test cases.
 Run three CPU-bound processes whose tickets are in a 3:2:1 ratio (for example, 30, 20, and 10 tickets).
 Before running the experiment, state the expected long-run CPU shares for the three processes. During
@@ -74,7 +74,7 @@ to auto-generate the graph; you may record the results and plot them using any g
 file graph.pdf
 
 
-Testing
+Testing (Done)
 Sample programs to test your implementation are available in:
 P1/
 and rebuild the xv6 kernel with them.
@@ -85,7 +85,7 @@ Do not treat passing the provided tests as sufficient evidence that your schedul
 what each test is checking and investigate failures rather than modifying code only until the tests pass.
 
 
-Additional Test Design
+Additional Test Design (Done)
 Identify one important scheduler property or plausible failure mode that is not directly tested by the
 provided test cases. In report.txt, describe:
 • the property or failure mode you want to test;
@@ -96,6 +96,6 @@ provided test cases. In report.txt, describe:
 Implementing and running this additional test is optional. If you implement it, include the test program with
 your submission and report the result.
 
-Style
+Style (Done)
 Provide adequate comments so that another programmer can understand the code you added or modified.
 Follow the coding style of the xv6 code base.
