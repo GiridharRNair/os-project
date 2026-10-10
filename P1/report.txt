@@ -83,3 +83,32 @@ time,ticks_30,ticks_20,ticks_10
 2800,1387,943,470
 2900,1443,970,487
 3000,1493,1002,505
+
+
+Additional Test Design
+
+1. Property / failure mode to test
+
+A process with only one ticket must still receive its fair share of the CPU (1/total of the time slices), no matter where it sits in the process table. In particular it must never be starved completely. The plausible failure mode is an off-by-one error in how the winning ticket is mapped to a process. The scheduler draws a number in [0, total) and walks the RUNNABLE processes with a running sum of tickets; the winner is the first process whose running sum is greater than the drawn number. Small mistakes here - drawing from [0, total - 1) or [1, total), comparing with >= instead of >, or starting the running sum at the wrong value - shift the boundary between two processes' ticket ranges by one ticket. For processes with thousands of tickets this changes their share by a fraction of a percent and is invisible, but a process with exactly one ticket at the beginning or end of the table loses its only ticket and is never scheduled (or the process next to it gets an extra ticket and double the expected share for a 1-ticket process).
+
+2. Setup
+
+A user program (for example onetickettest.c) forks three CPU-bound children that spin forever without sleeping:
+  - child A with 1 ticket   (forked first, so it sits earliest in the process table)
+  - child B with 98 tickets (forked second)
+  - child C with 1 ticket   (forked last, so it sits latest in the process table)
+for a total of 100 tickets. As in lotterytest, the parent calls settickets() with each child's count right before the fork() so the child holds the right number of tickets from the start. Placing a 1-ticket process at both ends of the table covers an off-by-one error in either direction. The parent then gives itself many tickets (so it can wake up promptly), sleeps for 2000 timer ticks, calls getpinfo(), records the ticks of A, B and C, kills the children and reports the result. xv6 runs on one CPU.
+
+3. Expected behavior of a correct implementation
+
+Each 1-ticket child should win about 1% of the 2000 lotteries: on average 20 ticks, with a standard deviation of about 4.5 ticks (binomial, n = 2000, p = 0.01). B should get about 98%, roughly 1960 ticks. The test passes if A and C each have between 5 and 40 ticks. For a correct scheduler the chance of falling below 5 is about 0.0016% and the chance of exceeding 40 is about 0.0023%, so a correct implementation essentially never fails this test.
+
+4. Result that would indicate an incorrect implementation
+
+- A or C has 0 ticks (or only a handful, below 5): the process is starved. For a correct scheduler the probability of 0 ticks in 2000 lotteries is 0.99^2000, about 2 in a billion, so this is a strong sign that the first or last ticket of the range can never be drawn.
+- A or C has far more than 40 ticks: it is getting extra tickets' worth of probability, for example because a boundary ticket of its neighbour is mapped to it.
+- B's ticks are not close to 98% of the total, or the three counts do not add up to roughly the elapsed time: the lottery is not covering the ticket range correctly.
+
+5. Why this test adds useful coverage beyond the provided tests
+
+The provided tests check ratios between processes with large differences in tickets (high_tickets requires the high process to get more than 20 times the ticks of the low one), equal sharing among many equal processes (stress_equal), and the error between one high and many low processes that each hold thousands of tickets (stress_manylow). None of them checks the exact share of a process holding a single ticket, and a starved 1-ticket process would still pass all of them - for example in high_tickets a low process with 0 ticks makes the "more than 20 times" check pass even more easily. Off-by-one errors at the edges of the ticket range are among the most likely bugs in a lottery scheduler, and they are only visible when a process's whole share is one ticket. This test isolates exactly that case, and it also confirms that the default of one ticket per process (which every ordinary process in the system has) actually gives a process a chance to run.
