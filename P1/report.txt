@@ -1,4 +1,55 @@
-Experimental Evaluation
+Existing Scheduler Understanding (Checkpoint)
+
+1. Where is the round robin scheduling decision made? Identify the relevant function and code region.
+
+The round robin scheduling decision is made in the kernel's process management file (proc.c), in the scheduler() function. Each CPU runs scheduler() in an infinite loop. On each pass it acquires ptable.lock and runs a for loop over the process table (for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)). Every process found in the RUNNABLE state is switched to, in process-table slot order, and when the end of the table is reached the scan starts over from the first slot. Round robin behavior comes from this repeated linear scan combined with the timer interrupt, which calls yield() so that a running process gives up the CPU after one time slice. This for loop is the region that will be replaced with the lottery selection.
+
+2. What condition must hold before a process can be selected to run?
+
+The process must be in the RUNNABLE state (p->state == RUNNABLE), and the scheduler must be holding ptable.lock while it checks. Processes that are UNUSED, EMBRYO, SLEEPING, RUNNING or ZOMBIE are skipped.
+
+3. What important process-state or context changes occur when the scheduler transfers control to a process and when control returns to the scheduler?
+
+When the scheduler transfers control to a process:
+- The scheduler sets the per-CPU variable proc to the chosen process (proc = p).
+- switchuvm(p) loads the process's page table and task state segment (kernel stack) so the CPU runs in that process's address space.
+- The process state changes from RUNNABLE to RUNNING.
+- swtch(&cpu->scheduler, proc->context) saves the scheduler's own context into cpu->scheduler and loads the chosen process's saved kernel context, so execution continues inside that process (in sched(), or in forkret() for a brand new process).
+- ptable.lock stays held across the switch; the process is responsible for releasing it (e.g. in forkret) and reacquiring it before switching back.
+
+When control returns to the scheduler:
+- The process itself, not the scheduler, changes its own state before it calls sched(): yield() sets it to RUNNABLE (time slice ended), sleep() sets it to SLEEPING, and exit() sets it to ZOMBIE. The state is therefore not always RUNNABLE on return.
+- The process calls sched(), which does swtch(&proc->context, cpu->scheduler). This saves the process's context and restores the scheduler's saved context, so the scheduler resumes right after its swtch call.
+- The scheduler then calls switchkvm() to go back to the kernel-only page table and sets proc = 0, since no process is running on this CPU. ptable.lock is still held and the scheduler continues scanning.
+
+Design Before Implementation (Checkpoint)
+
+1. Where will the number of tickets for each process be stored?
+
+In the process control block, struct proc in proc.h. I will add a new field (int tickets) holding the number of lottery tickets for that process. Because it lives in struct proc, it is stored per process-table slot and is directly accessible to settickets(), fork(), scheduler() and getpinfo().
+
+2. Where will the default ticket value be initialized?
+
+In allocproc() in proc.c, which sets tickets = 1 when it takes an UNUSED slot and marks it EMBRYO. I chose allocproc() rather than fork() because every process is created through allocproc(), including the first process created by userinit(), which never calls fork(). Initializing it in fork() alone would leave init with 0 tickets. allocproc() will also reset the ticks counter to 0 so a reused slot does not carry over old statistics.
+
+3. How will a child process inherit the ticket count of its parent?
+
+In fork(), after allocproc() has returned the new process (with the default of 1 ticket) and the other state has been copied from the parent, I will set np->tickets = proc->tickets, where proc is the calling (parent) process. This overrides the default, so a parent with 10 tickets produces a child that begins with 10 tickets.
+
+4. How will your scheduler determine the total number of tickets held by RUNNABLE processes?
+
+Each time through the scheduler loop, while holding ptable.lock, scheduler() will loop over every slot in ptable.proc and add p->tickets to a running total for each process whose state is RUNNABLE. Processes in any other state are not counted. If the total is 0 (no RUNNABLE processes), no lottery is held; the scheduler releases the lock and loops again.
+
+5. How will a lottery winner be selected from the RUNNABLE processes?
+
+I will implement a simple pseudo-random number generator inside the kernel (for example a linear congruential generator or xorshift with a static seed), since the user-level random functions are not available. The scheduler draws a random number and reduces it to the range 0..total_tickets-1 (winner = rand() % total). It then walks the process table again, keeping a running sum of the tickets of the RUNNABLE processes it passes. The first process for which the running sum becomes greater than the winning number (running sum > winner) is the winner and is switched to for that time slice. In effect, each RUNNABLE process owns the next block of numbers equal to its ticket count (the first owns 0..t1-1, the next t1..t1+t2-1, and so on). A process with more tickets covers a larger part of the 0..total-1 range, so its probability of winning is proportional to its share of the tickets.
+
+6. Where and when will you maintain the tick count reported by getpinfo()?
+
+The tick count will be a new field (int ticks) in struct proc, set to 0 in allocproc(). It is incremented in scheduler() each time a process is chosen as the lottery winner, right before switching to it (p->ticks++, while ptable.lock is held). That way it increases exactly once per time slice in which the process is selected to run, as the spec requires. getpinfo() will acquire ptable.lock and copy inuse (state != UNUSED), tickets, pid and ticks for each slot into the struct pstat, after validating the user pointer (argptr, returning -1 for a NULL or bad pointer).
+
+
+Experimental Evaluation: expected CPU shares, observed results, and interpretation
 
 Setup
 
@@ -112,3 +163,22 @@ Each 1-ticket child should win about 1% of the 2000 lotteries: on average 20 tic
 5. Why this test adds useful coverage beyond the provided tests
 
 The provided tests check ratios between processes with large differences in tickets (high_tickets requires the high process to get more than 20 times the ticks of the low one), equal sharing among many equal processes (stress_equal), and the error between one high and many low processes that each hold thousands of tickets (stress_manylow). None of them checks the exact share of a process holding a single ticket, and a starved 1-ticket process would still pass all of them - for example in high_tickets a low process with 0 ticks makes the "more than 20 times" check pass even more easily. Off-by-one errors at the edges of the ticket range are among the most likely bugs in a lottery scheduler, and they are only visible when a process's whole share is one ticket. This test isolates exactly that case, and it also confirms that the default of one ticket per process (which every ordinary process in the system has) actually gives a process a chance to run.
+
+
+AI Verification Record
+
+Use 1: Exploring plausible failure modes for the additional test design
+
+1. What I asked AI to help with: I asked for help finding a scheduler property or failure mode that the provided test cases do not already cover, and for help reasoning about whether such a test could reliably tell a correct scheduler from a broken one.
+
+2. Important output: The AI went through what each provided test checks (default tickets, fork inheritance, getpinfo pointer checks, sleeping processes, high-vs-low ratios, randomness, equal sharing, many-low vs one-high, and changing tickets mid-run) and pointed out that none of them checks the exact share of a process that holds a single ticket. It suggested an off-by-one error in mapping the winning number to a process (wrong draw range, >= instead of >, or a running sum that starts at the wrong value) as a plausible bug that would starve a 1-ticket process at either end of the process table while still passing the ratio tests. It proposed the 1 / 98 / 1 ticket setup and pass bounds of 5 to 40 ticks out of 2000, based on a binomial model (mean 20, standard deviation about 4.5). It also pointed out a second failure mode in my own scheduler: the ticket total is a 32-bit uint, so if the RUNNABLE processes' tickets add up to 2^32 or more (for example three processes with 2,000,000,000 tickets each) the total wraps around and the lottery picks the wrong winners.
+
+3. How I verified it: I read the provided tests myself to confirm the coverage gap. For example, high_tickets.c only checks that the high process gets more than 20 times the ticks of the low one, which a low process with 0 ticks would still pass. I checked my scheduler() code to confirm that it draws winner = rand() % total, which is in [0, total), and picks the first RUNNABLE process whose running sum is greater than winner, so each process owns exactly its own number of values. I recomputed the statistics by hand: mean = 2000 x 0.01 = 20, standard deviation = sqrt(2000 x 0.01 x 0.99), about 4.45, and the chance of a correct 1-ticket process getting 0 ticks = 0.99^2000, about 2 x 10^-9. For the overflow, I checked the arithmetic: 3 x 2,000,000,000 = 6,000,000,000, which is larger than 2^32 = 4,294,967,296 and wraps to 1,705,032,704, so the first process (2,000,000,000 tickets) would win every lottery. None of the provided tests use more than 100,000,000 tickets per process, so this case is not reached by them. I chose the 1-ticket test for the report because it targets a bug the provided tests cannot detect without requiring kernel changes, and I decided not to implement it since implementation is optional.
+
+Use 2: Diagnosing a build error caused by -Werror in the makefiles
+
+1. What I asked AI to help with: After running make clean, make qemu-nox kept failing before xv6 could boot, with "error: 'readdir_r' is deprecated [-Werror=deprecated-declarations]" in tools/mkfs.c. I asked why this happened and how to fix it without changing my scheduler code.
+
+2. Important output: The AI explained that the error was not in my code. make clean deletes tools/mkfs, the host program that builds fs.img, so it has to be recompiled. mkfs.c uses readdir_r, which the newer C library in my Ubuntu 22.04 Docker container marks as deprecated, and because the Makefile compiles everything with -Werror, that warning becomes a fatal error that stops the whole build. It suggested adding -Wno-deprecated-declarations only for the host tools in xv6/tools/makefile.mk, and it found a typo in that file's build rule ($(TOOLS_CLFAGS) instead of $(TOOLS_CFLAGS)) which meant any tools flag would have been silently ignored, so the typo had to be fixed too. The same reasoning later explained a second -Werror failure: the provided forktickets.c mixes tabs and spaces, which gcc 11 reports as misleading indentation, so the fix was to turn off only that warning for that one file in user/makefile.mk.
+
+3. How I verified it: I confirmed with git diff that tools/makefile.mk and mkfs.c were unchanged from the original xv6 tarball, so the failure came from the newer compiler environment and not from anything I had edited. After the change, a full make clean followed by make completed with no errors, and the build output showed -Wno-deprecated-declarations on the mkfs.c compile line only, while the kernel and user programs were still compiled with -Wall -Werror. I also checked that the fix would be safe in the submission environment: TOOLS_CFLAGS is only used in tools/makefile.mk, the misspelled variable was never defined anywhere (so it always expanded to nothing), and -Wno-deprecated-declarations has no effect on a compiler that does not produce that warning. Finally, I booted xv6 with make qemu-nox and ran the provided test cases on the rebuilt image. I committed the build fix separately from the scheduler changes ("ignore warning that interrupt build") so it is easy to identify.
